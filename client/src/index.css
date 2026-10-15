@@ -1,1 +1,17 @@
 @import "tailwindcss";
+
+/* Step 6 — floating emoji reactions: rise up and fade out over 2s. */
+@keyframes float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-140px) scale(1.4);
+  }
+}
+
+.animate-float-up {
+  animation: float-up 2s ease-out forwards;
+}

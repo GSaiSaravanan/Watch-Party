@@ -215,14 +215,19 @@ function ParticipantsModal({ participants, hostName, onClose }) {
   )
 }
 
-function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit, hostHeartbeat, onMediaAction, onHeartbeat, onRequestSync }) {
+function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit, hostHeartbeat, onMediaAction, onHeartbeat, onRequestSync, chatMessages, reaction, latencyMs, onSendChat, onSendReaction }) {
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
   const [chatInput, setChatInput] = useState('')
-  const [messages, setMessages] = useState([])
   const [queue, setQueue] = useState([])
   const [videoUrl, setVideoUrl] = useState('')
   const [showParticipants, setShowParticipants] = useState(false)
+  // Step 6 — floating emoji reactions overlaying the video (each floats up
+  // and fades out over 2s; removed by timer).
+  const [floaters, setFloaters] = useState([])
+  // Step 6 — diagnostics drawer state: local playback drift vs host (ms).
+  const [driftMs, setDriftMs] = useState(null)
+  const [showDiag, setShowDiag] = useState(true)
 
   // --- YouTube player + sync engine refs ---
   const playerRef = useRef(null)
@@ -251,12 +256,30 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
     }
   }
 
+  // Step 6 — live chat: emit to the server, which broadcasts to the room.
+  // The server resolves the sender name from join_room state; all clients
+  // (including us) render the message when 'chat_message' comes back.
   const sendMessage = (e) => {
     e.preventDefault()
     const text = chatInput.trim()
     if (!text) return
-    setMessages((prev) => [...prev, { id: Date.now(), author: 'You', text }])
+    onSendChat(text)
     setChatInput('')
+  }
+
+  // Step 6 — emoji reaction: emit to the server for room-wide broadcast.
+  const sendReaction = (emoji) => {
+    onSendReaction(emoji)
+  }
+
+  // Format a message timestamp as HH:MM.
+  const formatTime = (ts) => {
+    if (!ts) return ''
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return ''
+    }
   }
 
   const addVideo = (e) => {
@@ -543,6 +566,51 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
     return () => clearInterval(interval)
   }, [isHost, onHeartbeat])
 
+  // Step 6 — floating reactions: on every 'reaction' packet, spawn a badge
+  // that floats up and fades out over 2s, then remove it by timer. Updates
+  // are scheduled asynchronously (timer callbacks) to keep the effect body
+  // free of synchronous setState (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    if (!reaction) return
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const left = 10 + Math.random() * 80 // random horizontal position (%)
+    const addTimer = setTimeout(() => {
+      setFloaters((prev) => [...prev.slice(-11), { id, emoji: reaction.emoji, left }])
+    }, 0)
+    const removeTimer = setTimeout(() => {
+      setFloaters((prev) => prev.filter((f) => f.id !== id))
+    }, 2000)
+    return () => {
+      clearTimeout(addTimer)
+      clearTimeout(removeTimer)
+    }
+  }, [reaction])
+
+  // Step 6 — drift sampling: every 2s compare the local playhead to the
+  // estimated host time (getHostCurrentTime accounts for elapsed playback).
+  // Read-only — never touches the player, so no echo risk. The host's own
+  // drift is definitionally 0 and derived at render time (shownDrift below).
+  useEffect(() => {
+    if (isHost) return
+    const interval = setInterval(() => {
+      const player = playerRef.current
+      if (!player || !playerReadyRef.current) return
+      if (typeof player.getCurrentTime !== 'function') return
+      const hostTime = getHostCurrentTime()
+      if (hostTime == null) return
+      try {
+        const localTime = player.getCurrentTime()
+        setDriftMs(Math.round(Math.abs(localTime - hostTime) * 1000))
+      } catch {
+        // player not ready; leave the last value
+      }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [isHost, getHostCurrentTime, media, syncInit, hostHeartbeat])
+
+  // Host drift is 0 by definition; guests show the last sampled value.
+  const shownDrift = isHost ? 0 : driftMs
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <header className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
@@ -591,6 +659,18 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
           <div className="relative">
             <div className="aspect-video w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
               <div id="yt-player" className="h-full w-full" />
+            </div>
+            {/* Step 6 — floating emoji reactions overlay (float up + fade, 2s). */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+              {floaters.map((f) => (
+                <span
+                  key={f.id}
+                  style={{ left: `${f.left}%` }}
+                  className="animate-float-up absolute bottom-6 text-4xl drop-shadow-lg"
+                >
+                  {f.emoji}
+                </span>
+              ))}
             </div>
             {!isHost && (
               <button
@@ -663,17 +743,32 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
           {activeTab === 'chat' && (
             <div className="flex flex-1 flex-col">
               <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                {messages.length === 0 && (
+                {chatMessages.length === 0 && (
                   <p className="text-sm text-slate-500">No messages yet. Say hi 👋</p>
                 )}
-                {messages.map((m) => (
+                {chatMessages.map((m) => (
                   <div key={m.id} className="text-sm">
-                    <span className="font-semibold text-indigo-300">{m.author}</span>
-                    <span className="ml-2 text-slate-300">{m.text}</span>
+                    <span className="font-semibold text-indigo-300">{m.sender}</span>
+                    <span className="ml-2 text-xs text-slate-500">{formatTime(m.timestamp)}</span>
+                    <div className="text-slate-300">{m.text}</div>
                   </div>
                 ))}
               </div>
-              <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-800 p-3">
+              {/* Step 6 — quick emoji reactions: broadcast to the whole room. */}
+              <div className="flex items-center gap-2 border-t border-slate-800 px-3 pt-2">
+                {['❤️', '😂', '🍿'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => sendReaction(emoji)}
+                    aria-label={`Send ${emoji} reaction`}
+                    className="rounded-lg px-2 py-1 text-xl transition hover:scale-110 hover:bg-slate-800"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={sendMessage} className="flex gap-2 p-3">
                 <input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -732,6 +827,42 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
           onClose={() => setShowParticipants(false)}
         />
       )}
+
+      {/* Step 6 — latency & drift diagnostics drawer (bottom-right). */}
+      <div className="fixed bottom-4 right-4 z-40 w-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setShowDiag((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:text-slate-200"
+        >
+          <span>Diagnostics</span>
+          <span className="text-slate-500">{showDiag ? '▾' : '▴'}</span>
+        </button>
+        {showDiag && (
+          <div className="space-y-2 border-t border-slate-800 px-4 py-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Local Network Latency</span>
+              <span className={`font-mono font-semibold ${latencyMs != null && latencyMs <= 250 ? 'text-green-400' : 'text-amber-400'}`}>
+                {latencyMs != null ? `~${latencyMs} ms` : '—'}
+              </span>
+            </div>
+            <div className="text-right text-[11px] text-slate-600">Target: &le; 250 ms</div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Max Playback Drift</span>
+              <span className={`font-mono font-semibold ${shownDrift != null && shownDrift <= 500 ? 'text-green-400' : 'text-amber-400'}`}>
+                {shownDrift != null ? `${shownDrift} ms` : '—'}
+              </span>
+            </div>
+            <div className="text-right text-[11px] text-slate-600">Target: &le; 500 ms</div>
+            <div className="flex items-center justify-between border-t border-slate-800 pt-2">
+              <span className="text-slate-400">Connected Peers</span>
+              <span className="font-mono font-semibold text-slate-200">
+                {room.participantCount} user{room.participantCount === 1 ? '' : 's'}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -746,6 +877,10 @@ function App() {
   // Step 5 packets: late-join snapshot + host heartbeat playhead.
   const [syncInit, setSyncInit] = useState(null)
   const [hostHeartbeat, setHostHeartbeat] = useState(null)
+  // Step 6: live chat transcript, latest reaction packet, and RTT latency.
+  const [chatMessages, setChatMessages] = useState([])
+  const [reaction, setReaction] = useState(null)
+  const [latencyMs, setLatencyMs] = useState(null)
 
   const socketRef = useRef(null)
 
@@ -766,6 +901,24 @@ function App() {
       setMedia(data)
     })
     s.on('heartbeat', (data) => setHostHeartbeat(data))
+    // Step 6 — live chat + reactions + latency pong.
+    s.on('chat_message', (data) => {
+      setChatMessages((prev) => [
+        ...prev.slice(-99),
+        {
+          id: `${data.timestamp}-${Math.random().toString(36).slice(2, 7)}`,
+          sender: data.sender,
+          text: data.text,
+          timestamp: data.timestamp,
+        },
+      ])
+    })
+    s.on('reaction', (data) => setReaction(data))
+    s.on('pong_check', (data) => {
+      if (data && typeof data.sendTime === 'number') {
+        setLatencyMs(Date.now() - data.sendTime)
+      }
+    })
 
     return () => {
       s.off('connect')
@@ -774,6 +927,9 @@ function App() {
       s.off('media_action')
       s.off('sync_init')
       s.off('heartbeat')
+      s.off('chat_message')
+      s.off('reaction')
+      s.off('pong_check')
       s.disconnect()
       socketRef.current = null
     }
@@ -847,6 +1003,33 @@ function App() {
     s.emit('sync_request', { roomId })
   }, [roomId])
 
+  // Step 6 — live chat: sender name is resolved server-side from the
+  // join_room username.
+  const handleSendChat = useCallback((text) => {
+    const s = socketRef.current
+    if (!s || !roomId) return
+    s.emit('chat_message', { roomId, text, timestamp: Date.now() })
+  }, [roomId])
+
+  // Step 6 — emoji reaction broadcast.
+  const handleSendReaction = useCallback((emoji) => {
+    const s = socketRef.current
+    if (!s || !roomId) return
+    s.emit('send_reaction', { roomId, emoji })
+  }, [roomId])
+
+  // Step 6 — latency ping-pong: every 3s emit our sendTime; the server echoes
+  // it back in 'pong_check' and we compute RTT = Date.now() - sendTime.
+  useEffect(() => {
+    if (!roomId) return
+    const interval = setInterval(() => {
+      const s = socketRef.current
+      if (!s || !s.connected) return
+      s.emit('ping_check', { roomId, sendTime: Date.now() })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [roomId])
+
   if (roomId) {
     return (
       <RoomView
@@ -861,6 +1044,11 @@ function App() {
         onMediaAction={handleMediaAction}
         onHeartbeat={handleHeartbeat}
         onRequestSync={handleRequestSync}
+        chatMessages={chatMessages}
+        reaction={reaction}
+        latencyMs={latencyMs}
+        onSendChat={handleSendChat}
+        onSendReaction={handleSendReaction}
       />
     )
   }

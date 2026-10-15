@@ -233,6 +233,38 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('heartbeat', { currentTime });
   });
 
+  // Step 6 — live chat: broadcast a message to everyone in the room
+  // (including the sender, so all clients render the same list).
+  socket.on('chat_message', ({ roomId, sender, text, timestamp }) => {
+    if (!roomId || typeof text !== 'string' || !text.trim()) return;
+    roomId = String(roomId).toUpperCase();
+    const room = rooms[roomId];
+    if (!room) return;
+    // Prefer the sender's server-known username (stored at join_room) so
+    // names stay consistent; fall back to the provided sender label.
+    const knownName = room.participants.get(socket.id);
+    io.to(roomId).emit('chat_message', {
+      sender: knownName || (typeof sender === 'string' && sender ? sender.slice(0, 32) : 'Guest'),
+      text: text.slice(0, 500),
+      timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+    });
+  });
+
+  // Step 6 — emoji reactions: relay a floating reaction to the whole room.
+  socket.on('send_reaction', ({ roomId, emoji }) => {
+    if (!roomId || typeof emoji !== 'string' || !emoji) return;
+    roomId = String(roomId).toUpperCase();
+    if (!rooms[roomId]) return;
+    io.to(roomId).emit('reaction', { emoji: emoji.slice(0, 8) });
+  });
+
+  // Step 6 — latency ping-pong: echo the client's sendTime straight back so
+  // the client can compute RTT = Date.now() - sendTime.
+  socket.on('ping_check', ({ roomId, sendTime } = {}) => {
+    socket.emit('pong_check', { sendTime });
+    void roomId;
+  });
+
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
     // Remove the socket from every room it was part of and notify those rooms.
