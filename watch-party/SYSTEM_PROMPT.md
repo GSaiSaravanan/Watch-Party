@@ -1,1 +1,0 @@
-"We are building 'Watch Party'. Stack: Node.js + Socket.io on server, Vite + React + Tailwind CSS on client. Use YouTube IFrame API for video playback. Keep state management predictable and minimal. Never introduce external heavyweight databases; store active room state in server memory."
