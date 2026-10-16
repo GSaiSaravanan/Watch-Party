@@ -21,6 +21,8 @@ const io = new Server(server, {
 //   hostId: socketId currently holding the host seat (null when vacant),
 //   creatorToken: token proving who created the room (persistent host identity)
 //   media: { currentVideoId, isPlaying, lastTimestamp, lastUpdated }
+//   queue: [{ videoId, title, addedBy }]
+//   bookmarks: [{ id, timestamp, videoId, note, createdAt }]
 // }
 const rooms = {};
 
@@ -112,9 +114,11 @@ io.on('connection', (socket) => {
       : `Guest-${socket.id.slice(0, 4)}`;
 
     if (!rooms[roomId]) {
-      rooms[roomId] = { participants: new Map(), hostId: null, creatorToken: null, media: null };
+      rooms[roomId] = { participants: new Map(), hostId: null, creatorToken: null, media: null, queue: [], bookmarks: [] };
     }
     const room = rooms[roomId];
+    if (!Array.isArray(room.queue)) room.queue = [];
+    if (!Array.isArray(room.bookmarks)) room.bookmarks = [];
 
     // Establish the creator token the first time a real creator arrives.
     // A joiner claiming to be the creator is only trusted if the room has no
@@ -137,7 +141,11 @@ io.on('connection', (socket) => {
     // Send the host's live (elapsed-adjusted) player state directly to the
     // newly joined socket so it jumps to the current spot and state.
     // 'sync_init' is the Step 5 packet; 'media_action' is kept for compat.
+    // Also send the current queue + bookmarks so late-joiners see the same lists.
     const liveMedia = getLiveMedia(room);
+    socket.emit('queue_updated', room.queue);
+    // Late-joining guests immediately receive the authoritative bookmark list.
+    socket.emit('bookmarks_updated', room.bookmarks || []);
     if (liveMedia) {
       const legacyAction = liveMedia.isPlaying ? 'play' : 'pause';
       socket.emit('sync_init', {
@@ -145,6 +153,8 @@ io.on('connection', (socket) => {
         isPlaying: liveMedia.isPlaying,
         currentTime: liveMedia.currentTime,
         action: legacyAction,
+        queue: room.queue,
+        bookmarks: room.bookmarks,
       });
       socket.emit('media_action', {
         action: legacyAction,
@@ -168,7 +178,7 @@ io.on('connection', (socket) => {
   // { currentVideoId, isPlaying, lastTimestamp, lastUpdated } shape and relay
   // it to everyone else in the room. The sender is excluded via
   // socket.to(roomId). Accepts legacy { action, currentTime } payloads too.
-  socket.on('media_action', ({ roomId, action, currentTime, currentVideoId }) => {
+  socket.on('media_action', ({ roomId, action, currentTime, currentVideoId, videoId }) => {
     if (!roomId || !action) return;
     roomId = String(roomId).toUpperCase();
     const room = rooms[roomId];
@@ -177,15 +187,20 @@ io.on('connection', (socket) => {
     const ts = typeof currentTime === 'number' ? currentTime : 0;
     const prevMedia = room.media;
     const prevVideoId = (prevMedia && prevMedia.currentVideoId) || DEFAULT_VIDEO_ID;
-    const media = {
-      currentVideoId: typeof currentVideoId === 'string' && currentVideoId
+    // change_video carries the target in videoId (bookmark jumps) or
+    // currentVideoId (queue/legacy) — accept either.
+    const targetVideoId = typeof videoId === 'string' && videoId
+      ? videoId
+      : typeof currentVideoId === 'string' && currentVideoId
         ? currentVideoId
-        : prevVideoId,
-      isPlaying: action === 'play',
+        : prevVideoId;
+    const media = {
+      currentVideoId: targetVideoId,
+      isPlaying: action === 'change_video' ? true : action === 'play',
       lastTimestamp: ts,
       lastUpdated: Date.now(),
       // Legacy fields kept so older clients keep working.
-      action,
+      action: action === 'change_video' ? 'play' : action,
       currentTime: ts,
     };
     room.media = media;
@@ -194,14 +209,16 @@ io.on('connection', (socket) => {
       action,
       currentTime: ts,
       currentVideoId: media.currentVideoId,
+      videoId: media.currentVideoId,
       isPlaying: media.isPlaying,
     });
   });
 
-  // A guest (or anyone) can request the host's accurate current time, e.g. to
-  // snap back after drifting or recovering from a pause. We reply on the same
-  // 'media_action' channel (only to the requester) so the client's existing,
-  // isRemoteUpdate-guarded handling applies it without echoing.
+  // A guest (or anyone) can request the host's accurate current time AND
+  // video, e.g. to snap back after drifting or recovering from a pause. We
+  // reply on the same 'media_action' channel (only to the requester) so the
+  // client's existing, isRemoteUpdate-guarded handling applies it without
+  // echoing.
   socket.on('sync_request', ({ roomId }) => {
     if (!roomId) return;
     roomId = String(roomId).toUpperCase();
@@ -212,6 +229,7 @@ io.on('connection', (socket) => {
         action: liveMedia.isPlaying ? 'play' : 'pause',
         currentTime: liveMedia.currentTime,
         currentVideoId: liveMedia.currentVideoId,
+        videoId: liveMedia.currentVideoId,
         isPlaying: liveMedia.isPlaying,
       });
     }
@@ -250,12 +268,105 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Step 6 — emoji reactions: relay a floating reaction to the whole room.
-  socket.on('send_reaction', ({ roomId, emoji }) => {
+  // Step 6 — emoji reactions: relay a floating reaction to the whole room,
+  // including the sender's username so clients can show a name tag.
+  socket.on('send_reaction', ({ roomId, emoji, sender }) => {
     if (!roomId || typeof emoji !== 'string' || !emoji) return;
     roomId = String(roomId).toUpperCase();
-    if (!rooms[roomId]) return;
-    io.to(roomId).emit('reaction', { emoji: emoji.slice(0, 8) });
+    const room = rooms[roomId];
+    if (!room) return;
+    const knownName = room.participants.get(socket.id);
+    const senderName = knownName
+      || (typeof sender === 'string' && sender.trim() ? sender.trim().slice(0, 32) : 'Guest');
+    io.to(roomId).emit('reaction', { emoji: emoji.slice(0, 8), sender: senderName });
+  });
+
+  const broadcastQueue = (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    if (!Array.isArray(room.queue)) room.queue = [];
+    io.to(roomId).emit('queue_updated', room.queue);
+  };
+
+  // Functional, synchronized Movie Queue (in-memory per room).
+  socket.on('add_to_queue', ({ roomId, videoId, title, addedBy }) => {
+    if (!roomId || typeof videoId !== 'string' || !videoId.trim()) return;
+    roomId = String(roomId).toUpperCase();
+    const room = rooms[roomId];
+    if (!room) return;
+    if (!Array.isArray(room.queue)) room.queue = [];
+    const cleanId = videoId.trim().slice(0, 32);
+    const knownName = room.participants.get(socket.id);
+    const who = knownName
+      || (typeof addedBy === 'string' && addedBy.trim() ? addedBy.trim().slice(0, 32) : 'Guest');
+    room.queue.push({
+      videoId: cleanId,
+      title: typeof title === 'string' && title.trim() ? title.trim().slice(0, 120) : cleanId,
+      addedBy: who,
+    });
+    broadcastQueue(roomId);
+  });
+
+  socket.on('remove_from_queue', ({ roomId, index }) => {
+    if (!roomId || typeof index !== 'number') return;
+    roomId = String(roomId).toUpperCase();
+    const room = rooms[roomId];
+    if (!room || !Array.isArray(room.queue)) return;
+    if (index < 0 || index >= room.queue.length) return;
+    room.queue.splice(index, 1);
+    broadcastQueue(roomId);
+  });
+
+  const broadcastBookmarks = (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    if (!Array.isArray(room.bookmarks)) room.bookmarks = [];
+    io.to(roomId).emit('bookmarks_updated', room.bookmarks);
+  };
+
+  // Host Bookmarking (in-memory per room). No authorization checks — the
+  // server array is the single source of truth, broadcast room-wide.
+  socket.on('add_bookmark', (payload) => {
+    console.log('[SERVER] add_bookmark payload:', payload);
+    const roomId = payload?.roomId;
+    if (!roomId) return;
+    if (!rooms[roomId]) rooms[roomId] = { participants: new Map(), hostId: null, creatorToken: null, media: null, queue: [], bookmarks: [] }; // Force init if somehow missing
+    if (!Array.isArray(rooms[roomId].bookmarks)) {
+      rooms[roomId].bookmarks = [];
+    }
+    const rawTime = Number(payload.timestamp);
+    const safeTime = !isNaN(rawTime) && rawTime >= 0 ? rawTime : 0;
+    const mins = Math.floor(safeTime / 60);
+    const secs = String(Math.floor(safeTime % 60)).padStart(2, '0');
+    const newBm = {
+      id: 'bm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      timestamp: safeTime,
+      videoId: payload.videoId || rooms[roomId].media?.currentVideoId || 'dQw4w9WgXcQ',
+      note: payload.note || ('Bookmark at ' + mins + ':' + secs),
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    rooms[roomId].bookmarks.push(newBm);
+    rooms[roomId].bookmarks.sort((a, b) => a.timestamp - b.timestamp);
+    console.log('[SERVER] Broadcasting bookmarks_updated to room', roomId, 'count:', rooms[roomId].bookmarks.length);
+    io.in(roomId).emit('bookmarks_updated', rooms[roomId].bookmarks);
+  });
+
+  socket.on('delete_bookmark', ({ roomId, bookmarkId, creatorToken }) => {
+    if (!roomId || bookmarkId == null) return;
+    roomId = String(roomId).toUpperCase();
+    const room = rooms[roomId];
+    if (!room || !Array.isArray(room.bookmarks)) return;
+    if (room.hostId !== socket.id) {
+      if (typeof creatorToken === 'string' && creatorToken && room.creatorToken && creatorToken === room.creatorToken) {
+        room.hostId = socket.id; // verified creator reclaims the host seat
+        broadcastRoom(roomId);
+      } else if (room.hostId) {
+        return; // another socket holds the host seat — guest write rejected
+      }
+      // else: host seat vacant — allow the write (prevents silent loss)
+    }
+    room.bookmarks = room.bookmarks.filter((b) => b.id !== bookmarkId);
+    broadcastBookmarks(roomId);
   });
 
   // Step 6 — latency ping-pong: echo the client's sendTime straight back so

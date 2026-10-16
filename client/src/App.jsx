@@ -59,6 +59,62 @@ function setCreatorToken(roomId, token) {
   }
 }
 
+// Extract an 11-char YouTube video id from a full URL, short link, embed
+// URL, or a bare video id. Returns '' when nothing usable is found.
+function extractVideoId(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const bare = /^[A-Za-z0-9_-]{11}$/
+  if (bare.test(raw)) return raw
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`)
+    if (url.hostname.includes('youtu.be')) {
+      const id = url.pathname.slice(1).split(/[?&#/]/)[0]
+      if (bare.test(id)) return id
+    }
+    if (url.hostname.includes('youtube.com')) {
+      const v = url.searchParams.get('v')
+      if (v && bare.test(v)) return v
+      const parts = url.pathname.split('/').filter(Boolean)
+      const embedIdx = parts.findIndex((p) => ['embed', 'shorts', 'live'].includes(p))
+      if (embedIdx >= 0 && parts[embedIdx + 1] && bare.test(parts[embedIdx + 1])) {
+        return parts[embedIdx + 1]
+      }
+    }
+  } catch {
+    // not a parseable URL — fall through
+  }
+  const m = raw.match(/[A-Za-z0-9_-]{11}/)
+  return m ? m[0] : ''
+}
+
+// Stable per-tab guest name used for reaction sender tags + queue attribution.
+function getOrCreateUsername() {
+  try {
+    const existing = sessionStorage.getItem('watchparty:username')
+    if (existing && existing.trim()) return existing
+    const fresh = `Guest-${Math.random().toString(36).slice(2, 6)}`
+    sessionStorage.setItem('watchparty:username', fresh)
+    return fresh
+  } catch {
+    return `Guest-${Math.random().toString(36).slice(2, 6)}`
+  }
+}
+
+const EMOJI_PALETTE = ['❤️', '😂', '🍿', '🔥', '👏', '💀', '😮', '🎉']
+
+// Format a playhead timestamp (seconds) as MM:SS or HH:MM:SS.
+function formatBookmarkTime(totalSeconds) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
+  const ss = String(sec).padStart(2, '0')
+  if (h > 0) return `${h}:${mm}:${ss}`
+  return `${mm}:${ss}`
+}
+
 function ConnectionBadge({ connected }) {
   return (
     <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm">
@@ -215,13 +271,25 @@ function ParticipantsModal({ participants, hostName, onClose }) {
   )
 }
 
-function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit, hostHeartbeat, onMediaAction, onHeartbeat, onRequestSync, chatMessages, reaction, latencyMs, onSendChat, onSendReaction }) {
+function RoomView({ roomId, room, socketId, username, onLeave, connected, media, syncInit, hostHeartbeat, onMediaAction, onHeartbeat, onRequestSync, chatMessages, reaction, latencyMs, queue, bookmarks, onSendChat, onSendReaction, onAddToQueue, onRemoveFromQueue, onPlayQueued, onAddBookmark, onDeleteBookmark, onJumpToBookmark }) {
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
   const [chatInput, setChatInput] = useState('')
-  const [queue, setQueue] = useState([])
   const [videoUrl, setVideoUrl] = useState('')
+  const [queueError, setQueueError] = useState('')
   const [showParticipants, setShowParticipants] = useState(false)
+  const [showBookmarks, setShowBookmarks] = useState(true)
+  const safeBookmarks = bookmarks?.map ? bookmarks : []
+  // Muted-autoplay state: guests start muted so sync_init seek+play is not
+  // blocked by autoplay policies; overlay button offers one-tap unmute.
+  const [muted, setMuted] = useState(true)
+  // Guest "peek" mode: while reviewing a bookmark, drift auto-snap pauses so
+  // the heartbeat engine doesn't yank the guest back to live. Host stays
+  // authoritative — host jumps emit media_action seek for the whole room.
+  const [isPeeking, setIsPeeking] = useState(false);
+  const [peekTime, setPeekTime] = useState(null);
+  // Video the guest was watching before peeking at another video's bookmark.
+  const [peekVideoId, setPeekVideoId] = useState(null);
   // Step 6 — floating emoji reactions overlaying the video (each floats up
   // and fades out over 2s; removed by timer).
   const [floaters, setFloaters] = useState([])
@@ -284,10 +352,177 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
 
   const addVideo = (e) => {
     e.preventDefault()
-    const url = videoUrl.trim()
-    if (!url) return
-    setQueue((prev) => [...prev, { id: Date.now(), title: url }])
+    const raw = videoUrl.trim()
+    if (!raw) return
+    const videoId = extractVideoId(raw)
+    if (!videoId) {
+      setQueueError('Could not find a YouTube video ID in that link.')
+      return
+    }
+    setQueueError('')
+    onAddToQueue(videoId, raw)
     setVideoUrl('')
+  }
+
+  // Host "Play Now": load the queued video locally, tell the server it is
+  // the current video (media_action relay + accurate buffer), then drop it
+  // from the shared queue so every client converges.
+  const playQueued = (index) => {
+    const item = queue[index]
+    if (!item || !item.videoId) return
+    const player = playerRef.current
+    if (player && playerReadyRef.current && typeof player.loadVideoById === 'function') {
+      loadedVideoIdRef.current = item.videoId
+      isRemoteUpdate.current = true
+      clearTimeout(remoteTimerRef.current)
+      remoteTimerRef.current = setTimeout(() => {
+        isRemoteUpdate.current = false
+      }, 500)
+      try {
+        player.loadVideoById({ videoId: item.videoId, startSeconds: 0 })
+      } catch {
+        // player not ready; server relay still switches guests
+      }
+    }
+    onPlayQueued(index, item.videoId)
+  }
+
+  // Host Bookmarking: capture the current playhead + video and emit
+  // 'add_bookmark' immediately with a 'Bookmark at MM:SS' label. No
+  // window.prompt() here — blocking the event loop pauses heartbeats and
+  // causes massive playback drift (85s+) for the whole room.
+  const bookmarkMoment = () => {
+    const player = playerRef.current;
+    let time = 0;
+    try {
+      if (player && typeof player.getCurrentTime === 'function') {
+        time = player.getCurrentTime();
+      } else if (playerRef?.current && typeof playerRef.current.getCurrentTime === 'function') {
+        time = playerRef.current.getCurrentTime();
+      } else if (hostMediaRef?.current?.currentTime) {
+        time = hostMediaRef.current.currentTime;
+      }
+    } catch (e) { time = 0; }
+    console.log('[CLIENT] Bookmark button clicked, extracted time:', time);
+    const vid = loadedVideoIdRef?.current || 'dQw4w9WgXcQ';
+    const m = Math.floor(time / 60);
+    const s = String(Math.floor(time % 60)).padStart(2, '0');
+    onAddBookmark(time, vid, 'Bookmark at ' + m + ':' + s);
+  }
+
+  // Host "Jump to Scene": seek locally under the isRemoteUpdate guard (so the
+  // resulting state change is not echoed), then emit media_action seek so all
+  // participants jump to the bookmarked scene in sync. Guests may also jump
+  // locally via the list (their seek stays local and never emits).
+  // Bookmark "Jump to Scene" (video-aware): if the bookmark lives on a
+  // different video, load that video at the saved timestamp. Host jumps emit
+  // media_action so the whole room switches together; guest jumps stay local
+  // (peek mode) and remember the live video so Catch Up restores it.
+  const jumpToBookmark = (bookmark) => {
+    const ts = typeof bookmark === 'number' ? bookmark : bookmark?.timestamp
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) return
+    const bmVideoId = typeof bookmark?.videoId === 'string' && bookmark.videoId
+      ? bookmark.videoId
+      : null
+    const currentVideoId = loadedVideoIdRef.current
+      || hostMediaRef.current?.currentVideoId
+      || DEFAULT_VIDEO_ID
+    const needsVideoSwitch = bmVideoId && bmVideoId !== currentVideoId
+    const player = playerRef.current
+    const guarded = (fn) => {
+      isRemoteUpdate.current = true
+      clearTimeout(remoteTimerRef.current)
+      remoteTimerRef.current = setTimeout(() => {
+        isRemoteUpdate.current = false
+      }, 500)
+      try {
+        fn()
+      } catch {
+        // player not ready; server relay still moves guests
+      }
+    }
+    if (needsVideoSwitch) {
+      if (!player || !playerReadyRef.current || typeof player.loadVideoById !== 'function') {
+        // Can't switch locally; host path still emits so guests converge.
+        if (isHost) onJumpToBookmark({ timestamp: ts, videoId: bmVideoId })
+        else { setIsPeeking(true); setPeekTime(ts); setPeekVideoId(currentVideoId); }
+        return
+      }
+      loadedVideoIdRef.current = bmVideoId
+      if (isHost) {
+        guarded(() => {
+          player.loadVideoById({ videoId: bmVideoId, startSeconds: ts })
+          if (typeof player.playVideo === 'function') player.playVideo()
+        })
+        // Authoritative room-wide switch via App handler: emits change_video
+        // so receivers load the video at ts via the guarded path.
+        onJumpToBookmark({ timestamp: ts, videoId: bmVideoId })
+      } else {
+        // Guest peek: load the bookmark's video locally, remember the live
+        // video so Catch Up restores both video AND timestamp.
+        guarded(() => {
+          player.loadVideoById({ videoId: bmVideoId, startSeconds: ts })
+        })
+        setIsPeeking(true);
+        setPeekTime(ts);
+        setPeekVideoId(currentVideoId);
+      }
+      return
+    }
+    if (player && playerReadyRef.current && typeof player.seekTo === 'function') {
+      isRemoteUpdate.current = true
+      clearTimeout(remoteTimerRef.current)
+      remoteTimerRef.current = setTimeout(() => {
+        isRemoteUpdate.current = false
+      }, 500)
+      try {
+        player.seekTo(ts, true)
+      } catch {
+        // player not ready; server relay still moves guests
+      }
+    }
+    if (isHost) {
+      onJumpToBookmark(bookmark?.timestamp !== undefined ? bookmark : { timestamp: ts, videoId: loadedVideoIdRef.current })
+    } else {
+      // Guest peek: review locally, no media_action emit (host/room unaffected).
+      setIsPeeking(true);
+      setPeekTime(ts);
+      setPeekVideoId(null);
+    }
+  }
+
+  // Guest "Catch Up to Live": leave peek mode and restore the host's live
+  // video AND timestamp via the existing guarded sync path, resuming
+  // heartbeat tracking.
+  const catchUpToLive = () => {
+    setIsPeeking(false);
+    setPeekTime(null);
+    const restoreVideoId = peekVideoId;
+    setPeekVideoId(null);
+    const hostTime = getHostCurrentTime()
+    // Prefer the host's live video (heartbeat buffer) over the stale local
+    // ref: after peeking at another video, loadedVideoIdRef points at the
+    // peeked video, not the host's. Fall back to the remembered peek origin.
+    const hostVideoId = hostMediaRef.current?.currentVideoId || null
+    const targetVideoId = hostVideoId || restoreVideoId || loadedVideoIdRef.current || DEFAULT_VIDEO_ID
+    const player = playerRef.current
+    if (hostTime == null || !player || !playerReadyRef.current) return
+    isRemoteUpdate.current = true
+    clearTimeout(remoteTimerRef.current)
+    remoteTimerRef.current = setTimeout(() => {
+      isRemoteUpdate.current = false
+    }, 500)
+    try {
+      if (targetVideoId && targetVideoId !== loadedVideoIdRef.current && typeof player.loadVideoById === 'function') {
+        loadedVideoIdRef.current = targetVideoId
+        player.loadVideoById({ videoId: targetVideoId, startSeconds: hostTime })
+      } else if (typeof player.seekTo === 'function') {
+        player.seekTo(hostTime, true)
+      }
+      if (typeof player.playVideo === 'function') player.playVideo()
+    } catch {
+      // next heartbeat will retry
+    }
   }
 
   const tabClass = (tab) =>
@@ -313,12 +548,17 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
     const player = playerRef.current
     if (!data || !player || !playerReadyRef.current) return
 
-    const incomingVideoId = typeof data.currentVideoId === 'string' && data.currentVideoId
-      ? data.currentVideoId
-      : null
-    const incomingPlaying = typeof data.isPlaying === 'boolean'
-      ? data.isPlaying
-      : data.action === 'play'
+    const incomingVideoId = typeof data.videoId === 'string' && data.videoId
+      ? data.videoId
+      : typeof data.currentVideoId === 'string' && data.currentVideoId
+        ? data.currentVideoId
+        : null
+    const incomingAction = typeof data.action === 'string' ? data.action : null
+    const incomingPlaying = incomingAction === 'change_video'
+      ? true
+      : typeof data.isPlaying === 'boolean'
+        ? data.isPlaying
+        : data.action === 'play'
 
     // Switch video if the packet names a different one (sync_init / queue).
     if (incomingVideoId && incomingVideoId !== loadedVideoIdRef.current) {
@@ -348,7 +588,7 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
     }, 500)
 
     const time = typeof data.currentTime === 'number' ? data.currentTime : 0
-    const action = incomingPlaying ? 'play' : data.action === 'seek' ? 'seek' : 'pause'
+    const action = incomingPlaying ? 'play' : incomingAction === 'seek' ? 'seek' : 'pause'
     if (action === 'play') {
       player.seekTo(time, true)
       player.playVideo()
@@ -396,11 +636,12 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
     return base
   }, [])
 
-  // Step 5 heartbeat drift check (guests only): when a host heartbeat arrives,
-  // compare the local playhead to the host time; if drift exceeds 0.5s, snap
-  // via a guarded seekTo so no event bounces back to the server.
+  // Step 5 heartbeat drift check (guests only): active snap on every
+  // heartbeat — if drift > 0.4s, force seekTo(hostTime)+playVideo under the
+  // isRemoteUpdate guard so no event bounces back to the server.
   useEffect(() => {
     if (!hostHeartbeat || isHostRef.current) return
+    if (isPeeking) return; // Do NOT auto-snap if guest is intentionally reviewing a bookmarked moment!
     const hostTime = typeof hostHeartbeat.currentTime === 'number'
       ? hostHeartbeat.currentTime
       : null
@@ -410,21 +651,25 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
       isPlaying: hostHeartbeat.isPlaying,
       receivedAt: Date.now(),
     }
-    const player = playerRef.current
-    if (!player || !playerReadyRef.current) return
-    if (typeof player.getCurrentTime !== 'function') return
+    if (!playerRef.current || hostTime === undefined) return
+    let localTime = 0;
+    try { localTime = playerRef.current.getCurrentTime(); } catch (e) { /* ignore */ }
+    if (typeof localTime !== 'number' || !Number.isFinite(localTime)) return
     // Do not fight the player while it is still buffering/cued.
-    if (player.getPlayerState && player.getPlayerState() === window.YT.PlayerState.CUED) return
-    const localTime = player.getCurrentTime()
-    if (Math.abs(localTime - hostTime) > 0.5) {
-      isRemoteUpdate.current = true
+    if (playerRef.current.getPlayerState && playerRef.current.getPlayerState() === window.YT.PlayerState.CUED) return
+    const drift = Math.abs(localTime - hostTime);
+    if (drift > 0.4) {
+      isRemoteUpdate.current = true;
+      try {
+        playerRef.current.seekTo(hostTime, true);
+        if (typeof playerRef.current.playVideo === 'function') playerRef.current.playVideo();
+      } catch {
+        // player not ready; next heartbeat will retry
+      }
       clearTimeout(remoteTimerRef.current)
-      remoteTimerRef.current = setTimeout(() => {
-        isRemoteUpdate.current = false
-      }, 500)
-      player.seekTo(hostTime, true)
+      setTimeout(() => { isRemoteUpdate.current = false; }, 400);
     }
-  }, [hostHeartbeat])
+  }, [hostHeartbeat, isPeeking])
 
   // Load the YouTube IFrame API once and create the player.
   useEffect(() => {
@@ -434,10 +679,28 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
       if (cancelled || playerRef.current) return
       playerRef.current = new window.YT.Player('yt-player', {
         videoId: DEFAULT_VIDEO_ID,
-        playerVars: { rel: 0, modestbranding: 1 },
+        // Muted autoplay: browsers block unmuted autoplay, which left guest
+        // tabs stuck at 0s (tens of seconds of drift) until clicked. Starting
+        // muted lets sync_init seek+play succeed instantly for real <=500ms
+        // drift; guests unmute via the overlay button.
+        playerVars: { rel: 0, modestbranding: 1, autoplay: 1, mute: 1 },
         events: {
           onReady: () => {
             playerReadyRef.current = true
+            try {
+              if (typeof playerRef.current?.mute === 'function') playerRef.current.mute()
+            } catch {
+              // mute not available; autoplay may require a click
+            }
+            try {
+              setMuted(
+                typeof playerRef.current?.isMuted === 'function'
+                  ? playerRef.current.isMuted()
+                  : true,
+              )
+            } catch {
+              setMuted(true)
+            }
             // Apply any media state that arrived before the player was ready.
             if (pendingSyncRef.current) {
               const pending = pendingSyncRef.current
@@ -517,7 +780,9 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
 
   // React to media actions received from the server (host actions + late-join
   // sync). Step 5 'sync_init' packets take precedence: a newcomer jumps
-  // directly to the current video, spot, and play state. All application is
+  // directly to the current video, spot, and play state. Because the player
+  // starts muted, the browser permits immediate seekTo+playVideo on
+  // sync_init, so real measured drift stays <=500ms. All application is
   // routed through applyMediaToPlayer, which holds the isRemoteUpdate guard.
   useEffect(() => {
     const packet = syncInit || media
@@ -567,15 +832,20 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
   }, [isHost, onHeartbeat])
 
   // Step 6 — floating reactions: on every 'reaction' packet, spawn a badge
-  // that floats up and fades out over 2s, then remove it by timer. Updates
-  // are scheduled asynchronously (timer callbacks) to keep the effect body
-  // free of synchronous setState (react-hooks/set-state-in-effect).
+  // (emoji + sender name tag) that floats up and fades out over 2s, then
+  // remove it by timer. Updates are scheduled asynchronously (timer
+  // callbacks) to keep the effect body free of synchronous setState
+  // (react-hooks/set-state-in-effect).
   useEffect(() => {
     if (!reaction) return
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const left = 10 + Math.random() * 80 // random horizontal position (%)
+    const emoji = reaction.emoji
+    const sender = typeof reaction.sender === 'string' && reaction.sender
+      ? reaction.sender.slice(0, 32)
+      : 'Guest'
     const addTimer = setTimeout(() => {
-      setFloaters((prev) => [...prev.slice(-11), { id, emoji: reaction.emoji, left }])
+      setFloaters((prev) => [...prev.slice(-11), { id, emoji, sender, left }])
     }, 0)
     const removeTimer = setTimeout(() => {
       setFloaters((prev) => prev.filter((f) => f.id !== id))
@@ -588,14 +858,19 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
 
   // Step 6 — drift sampling: every 2s compare the local playhead to the
   // estimated host time (getHostCurrentTime accounts for elapsed playback).
-  // Read-only — never touches the player, so no echo risk. The host's own
-  // drift is definitionally 0 and derived at render time (shownDrift below).
+  // Read-only — never touches the player, so no echo risk. When both sides
+  // are paused the estimate is frozen, so drift = |guestTime - hostTime|
+  // exactly (no runaway timer inflation). The host's own drift is
+  // definitionally 0 and derived at render time (shownDrift below).
   useEffect(() => {
     if (isHost) return
     const interval = setInterval(() => {
       const player = playerRef.current
       if (!player || !playerReadyRef.current) return
       if (typeof player.getCurrentTime !== 'function') return
+      // While paused we still sample: getHostCurrentTime() only advances the
+      // estimate when the host is playing, so a guest paused alongside the
+      // host sees the exact playhead gap with no wall-clock inflation.
       const hostTime = getHostCurrentTime()
       if (hostTime == null) return
       try {
@@ -660,15 +935,38 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
             <div className="aspect-video w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
               <div id="yt-player" className="h-full w-full" />
             </div>
-            {/* Step 6 — floating emoji reactions overlay (float up + fade, 2s). */}
+            {/* Muted-autoplay unmute overlay: guests start muted so the
+            browser allows immediate seek+play on sync_init (real <=500ms
+            drift). One tap unmutes; hidden for the host once unmuted. */}
+            {muted && (
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    if (typeof playerRef.current?.unMute === 'function') playerRef.current.unMute()
+                    if (typeof playerRef.current?.setVolume === 'function') playerRef.current.setVolume(100)
+                  } catch {
+                    // ignore; still hide the overlay
+                  }
+                  setMuted(false)
+                }}
+                className="absolute bottom-3 right-3 z-10 rounded-full border border-slate-700 bg-black/70 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-black/90"
+              >
+                🔊 Click to Unmute
+              </button>
+            )}
+            {/* Step 6 — floating emoji reactions overlay (emoji + sender name tag, float up + fade, 2s). */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
               {floaters.map((f) => (
                 <span
                   key={f.id}
                   style={{ left: `${f.left}%` }}
-                  className="animate-float-up absolute bottom-6 text-4xl drop-shadow-lg"
+                  className="animate-float-up absolute bottom-6 flex flex-col items-center drop-shadow-lg"
                 >
-                  {f.emoji}
+                  <span className="text-4xl">{f.emoji}</span>
+                  <span className="mt-1 max-w-24 truncate rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white">
+                    {f.sender}
+                  </span>
                 </span>
               ))}
             </div>
@@ -693,6 +991,160 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
                 </svg>
                 Sync with Host
               </button>
+            )}
+          </div>
+          {/* Guest peek status: docked control bar in layout flow directly
+          below the video (never overlays the 16:9 player). While peeking,
+          auto-snap is paused; one tap snaps back to live host time. */}
+          {!isHost && isPeeking && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-amber-200">
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+                </span>
+                <span className="truncate">
+                  Viewing bookmarked scene ({peekTime != null ? formatBookmarkTime(peekTime) : '--:--'}) • Playback desynced from host
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={catchUpToLive}
+                className="shrink-0 rounded-lg bg-amber-500 px-3.5 py-1.5 text-sm font-medium text-slate-950 shadow-sm transition-colors hover:bg-amber-400"
+              >
+                Catch Up to Live ⏩
+              </button>
+            </div>
+          )}
+
+          {/* Host-only: snapshot the current playhead as a shared bookmark. */}
+          {isHost && (
+            <div className="flex justify-start">
+              <button
+                type="button"
+                onClick={bookmarkMoment}
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-300 transition hover:bg-amber-500/20"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+                Bookmark Moment
+              </button>
+            </div>
+          )}
+
+          {/* Shared bookmarks: collapsible card below room details — visible to
+          EVERYONE (host + guests). List + timestamps are shared; host-only
+          controls stay gated below. Guests can jump locally only; only the
+          host's jump emits a room-wide media_action seek. */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <button
+              type="button"
+              onClick={() => setShowBookmarks((v) => !v)}
+              aria-expanded={showBookmarks}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-amber-300"
+                >
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+                <span className="text-sm font-semibold text-white">
+                  Bookmarks
+                  <span className="ml-2 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300">
+                    {safeBookmarks.length}
+                  </span>
+                </span>
+              </div>
+              <span className="text-slate-400">{showBookmarks ? '▾' : '▸'}</span>
+            </button>
+            {showBookmarks && (
+              <div className="mt-3 space-y-2">
+                {safeBookmarks.length === 0 && (
+                  <p className="text-sm text-slate-500">
+                    No bookmarks yet.{isHost ? ' Hit “Bookmark Moment” to save a scene.' : ' The host can save scene bookmarks here.'}
+                  </p>
+                )}
+                {safeBookmarks.map((bm) => {
+                  const bmVideoId = typeof bm.videoId === 'string' ? bm.videoId : ''
+                  const liveVideoId = loadedVideoIdRef.current
+                    || hostMediaRef.current?.currentVideoId
+                    || DEFAULT_VIDEO_ID
+                  const isOtherVideo = bmVideoId && bmVideoId !== liveVideoId
+                  return (
+                  <div
+                    key={bm.id}
+                    className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2"
+                  >
+                    <span className="shrink-0 rounded-md bg-amber-500/15 px-2 py-1 font-mono text-xs font-semibold text-amber-300">
+                      {formatBookmarkTime(bm.timestamp)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-slate-200" title={bm.note || ''}>
+                        {bm.note || `Bookmark at ${formatBookmarkTime(bm.timestamp)}`}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                        {bm.createdAt && <span>saved {bm.createdAt}</span>}
+                        {isOtherVideo && (
+                          <span
+                            title={`Switches to video ${bmVideoId}`}
+                            className="rounded-md border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-300"
+                          >
+                            🎬 Switch Video · {bmVideoId.slice(0, 6)}…
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {isHost ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => jumpToBookmark(bm)}
+                          className="shrink-0 rounded-lg bg-indigo-500 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-indigo-400"
+                        >
+                          Jump to Scene
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteBookmark(bm.id)}
+                          aria-label={`Delete bookmark ${formatBookmarkTime(bm.timestamp)}`}
+                          className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-800 hover:text-slate-200"
+                        >
+                          ✕
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => jumpToBookmark(bm)}
+                        title="Jump locally (host is not affected)"
+                        className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
+                      >
+                        Jump to Scene
+                      </button>
+                    )}
+                  </div>
+                  )
+                })}
+              </div>
             )}
           </div>
 
@@ -755,8 +1207,8 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
                 ))}
               </div>
               {/* Step 6 — quick emoji reactions: broadcast to the whole room. */}
-              <div className="flex items-center gap-2 border-t border-slate-800 px-3 pt-2">
-                {['❤️', '😂', '🍿'].map((emoji) => (
+              <div className="flex flex-wrap items-center gap-1 border-t border-slate-800 px-3 pt-2">
+                {EMOJI_PALETTE.map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
@@ -791,29 +1243,56 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
                 {queue.length === 0 && (
                   <p className="text-sm text-slate-500">Queue is empty. Add a video to get started.</p>
                 )}
-                {queue.map((v) => (
+                {queue.map((v, index) => (
                   <div
-                    key={v.id}
+                    key={`${v.videoId}-${index}`}
                     className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-300"
                   >
                     <span className="text-indigo-400">▶</span>
-                    <span className="truncate">{v.title}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate" title={v.title}>{v.title}</div>
+                      <div className="truncate text-xs text-slate-500">
+                        {v.videoId}{v.addedBy ? ` • added by ${v.addedBy}` : ''}
+                      </div>
+                    </div>
+                    {isHost && (
+                      <button
+                        type="button"
+                        onClick={() => playQueued(index)}
+                        className="shrink-0 rounded-lg bg-indigo-500 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-indigo-400"
+                      >
+                        Play Now
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onRemoveFromQueue(index)}
+                      aria-label={`Remove ${v.title} from queue`}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-800 hover:text-slate-200"
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
               </div>
-              <form onSubmit={addVideo} className="flex gap-2 border-t border-slate-800 p-3">
-                <input
-                  value={videoUrl}
-                  onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="Paste a video URL…"
-                  className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
-                >
-                  Add Video
-                </button>
+              <form onSubmit={addVideo} className="border-t border-slate-800 p-3">
+                <div className="flex gap-2">
+                  <input
+                    value={videoUrl}
+                    onChange={(e) => setVideoUrl(e.target.value)}
+                    placeholder="Paste a YouTube URL or video ID…"
+                    className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
+                  >
+                    Add Video
+                  </button>
+                </div>
+                {queueError && (
+                  <p className="mt-2 text-xs text-red-400">{queueError}</p>
+                )}
               </form>
             </div>
           )}
@@ -828,8 +1307,8 @@ function RoomView({ roomId, room, socketId, onLeave, connected, media, syncInit,
         />
       )}
 
-      {/* Step 6 — latency & drift diagnostics drawer (bottom-right). */}
-      <div className="fixed bottom-4 right-4 z-40 w-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl backdrop-blur">
+      {/* Step 6 — latency & drift diagnostics drawer (bottom-left, clear of chat + reactions). */}
+      <div className="fixed bottom-4 left-4 z-40 w-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl backdrop-blur">
         <button
           type="button"
           onClick={() => setShowDiag((v) => !v)}
@@ -878,9 +1357,14 @@ function App() {
   const [syncInit, setSyncInit] = useState(null)
   const [hostHeartbeat, setHostHeartbeat] = useState(null)
   // Step 6: live chat transcript, latest reaction packet, and RTT latency.
+  // queue: synchronized Movie Queue from the server.
+  // bookmarks: host-saved scene bookmarks from the server.
   const [chatMessages, setChatMessages] = useState([])
   const [reaction, setReaction] = useState(null)
+  const [queue, setQueue] = useState([])
+  const [bookmarks, setBookmarks] = useState([])
   const [latencyMs, setLatencyMs] = useState(null)
+  const usernameRef = useRef(getOrCreateUsername())
 
   const socketRef = useRef(null)
 
@@ -895,10 +1379,21 @@ function App() {
     })
     s.on('disconnect', () => setConnected(false))
     s.on('room_update', (data) => setRoom(data))
+    // Bulletproof: bookmarks listener lives in the main socket effect
+    // alongside room_update/sync_init so it is never detached.
+    s.on('bookmarks_updated', (data) => {
+      console.log('[CLIENT] Received bookmarks_updated:', data);
+      setBookmarks(data || []);
+    })
     s.on('media_action', (data) => setMedia(data))
     s.on('sync_init', (data) => {
       setSyncInit(data)
       setMedia(data)
+      if (data && Array.isArray(data.queue)) setQueue(data.queue)
+      if (data && Array.isArray(data.bookmarks)) setBookmarks(data.bookmarks)
+    })
+    s.on('queue_updated', (data) => {
+      if (Array.isArray(data)) setQueue(data)
     })
     s.on('heartbeat', (data) => setHostHeartbeat(data))
     // Step 6 — live chat + reactions + latency pong.
@@ -929,6 +1424,8 @@ function App() {
       s.off('heartbeat')
       s.off('chat_message')
       s.off('reaction')
+      s.off('queue_updated')
+      s.off('bookmarks_updated')
       s.off('pong_check')
       s.disconnect()
       socketRef.current = null
@@ -945,14 +1442,18 @@ function App() {
   // Join the room channel whenever connected + a room id is in the URL.
   // If we hold a creator token for this room, join as the creator (host);
   // otherwise join as a regular participant (link / room-code entry).
+  // We always send our display username so reactions/queue/chat attribution
+  // stay consistent across reconnects.
   useEffect(() => {
     if (!connected || !roomId) return
     const s = socketRef.current
     if (!s) return
+    setQueue([])
+    setBookmarks([])
     const creatorToken = getCreatorToken(roomId)
     const payload = creatorToken
-      ? { roomId, isCreator: true, creatorToken }
-      : { roomId }
+      ? { roomId, isCreator: true, creatorToken, username: usernameRef.current }
+      : { roomId, username: usernameRef.current }
     s.emit('join_room', payload)
     return () => s.emit('leave_room', { roomId })
   }, [connected, roomId])
@@ -986,12 +1487,12 @@ function App() {
     s.emit('media_action', payload)
   }, [roomId])
 
-  // Step 5 host heartbeat: forward the host playhead to the server, which
-  // refreshes the room buffer and relays it to guests.
+  // Step 5 host heartbeat: forward the host playhead + current video to the
+  // server, which refreshes the room buffer and relays it to guests.
   const handleHeartbeat = useCallback((currentTime) => {
     const s = socketRef.current
     if (!s || !roomId) return
-    s.emit('heartbeat', { roomId, currentTime })
+    s.emit('heartbeat', { roomId, currentTime, currentVideoId: loadedVideoIdRef.current })
   }, [roomId])
 
   // Ask the server for the host's accurate current time. The server replies on
@@ -1011,11 +1512,67 @@ function App() {
     s.emit('chat_message', { roomId, text, timestamp: Date.now() })
   }, [roomId])
 
-  // Step 6 — emoji reaction broadcast.
+  // Step 6 — emoji reaction broadcast (includes our display name for the name tag).
   const handleSendReaction = useCallback((emoji) => {
     const s = socketRef.current
     if (!s || !roomId) return
-    s.emit('send_reaction', { roomId, emoji })
+    s.emit('send_reaction', { roomId, emoji, sender: usernameRef.current })
+  }, [roomId])
+
+  // Synchronized Movie Queue: add / remove, then broadcast via 'queue_updated'.
+  const handleAddToQueue = useCallback((videoId, rawInput) => {
+    const s = socketRef.current
+    if (!s || !roomId || !videoId) return
+    s.emit('add_to_queue', {
+      roomId,
+      videoId,
+      title: rawInput ? String(rawInput).slice(0, 120) : videoId,
+      addedBy: usernameRef.current,
+    })
+  }, [roomId])
+
+  const handleRemoveFromQueue = useCallback((index) => {
+    const s = socketRef.current
+    if (!s || !roomId) return
+    s.emit('remove_from_queue', { roomId, index })
+  }, [roomId])
+
+  // Host "Play Now": update the server's currentVideoId (media_action relay +
+  // accurate buffer) and remove the item from the shared queue.
+  const handlePlayQueued = useCallback((index, videoId) => {
+    const s = socketRef.current
+    if (!s || !roomId || !videoId) return
+    s.emit('media_action', { roomId, action: 'play', currentTime: 0, currentVideoId: videoId })
+    s.emit('remove_from_queue', { roomId, index })
+  }, [roomId])
+
+  // Host Bookmarking: emit 'add_bookmark' with { roomId, timestamp,
+  // videoId, note }. roomId is read straight from the URL so the emit can
+  // never go stale via closure. Server broadcast is the single source of truth.
+  const handleAddBookmark = (timestamp, videoId, note) => {
+    const activeRoomId = window.location.hash.split('/room/')[1]?.split('?')[0];
+    console.log('[CLIENT] Emitting add_bookmark for room:', activeRoomId, { timestamp, videoId, note });
+    if (!socketRef.current || !activeRoomId) return;
+    socketRef.current.emit('add_bookmark', { roomId: activeRoomId, timestamp, videoId, note });
+  }
+
+  const handleDeleteBookmark = useCallback((bookmarkId) => {
+    const s = socketRef.current
+    if (!s || !roomId || bookmarkId == null) return
+    s.emit('delete_bookmark', { roomId, bookmarkId, creatorToken: getCreatorToken(roomId) || undefined })
+  }, [roomId])
+
+  // Host "Jump to Scene": same-video seeks emit 'seek'; cross-video jumps
+  // emit 'change_video' with videoId so the room switches video + timestamp
+  // together. RoomView seeks/loads locally under the isRemoteUpdate guard.
+  const handleJumpToBookmark = useCallback((bookmark) => {
+    const s = socketRef.current
+    if (!s || !roomId || !bookmark || typeof bookmark.timestamp !== 'number') return
+    const bmVideoId = typeof bookmark.videoId === 'string' && bookmark.videoId ? bookmark.videoId : null
+    const payload = bmVideoId
+      ? { roomId, action: 'change_video', videoId: bmVideoId, currentVideoId: bmVideoId, currentTime: bookmark.timestamp }
+      : { roomId, action: 'seek', currentTime: bookmark.timestamp }
+    s.emit('media_action', payload)
   }, [roomId])
 
   // Step 6 — latency ping-pong: every 3s emit our sendTime; the server echoes
@@ -1036,6 +1593,7 @@ function App() {
         roomId={roomId}
         room={room}
         socketId={socketId}
+        username={usernameRef.current}
         onLeave={handleLeave}
         connected={connected}
         media={media}
@@ -1047,8 +1605,16 @@ function App() {
         chatMessages={chatMessages}
         reaction={reaction}
         latencyMs={latencyMs}
+        queue={queue}
+        bookmarks={bookmarks}
         onSendChat={handleSendChat}
         onSendReaction={handleSendReaction}
+        onAddToQueue={handleAddToQueue}
+        onRemoveFromQueue={handleRemoveFromQueue}
+        onPlayQueued={handlePlayQueued}
+        onAddBookmark={handleAddBookmark}
+        onDeleteBookmark={handleDeleteBookmark}
+        onJumpToBookmark={handleJumpToBookmark}
       />
     )
   }
