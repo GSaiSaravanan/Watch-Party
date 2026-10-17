@@ -117,15 +117,17 @@ function formatBookmarkTime(totalSeconds) {
 
 function ConnectionBadge({ connected }) {
   return (
-    <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm">
+    <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm">
       <span
         role="status"
         aria-label={connected ? 'Connected' : 'Disconnected'}
-        className={`inline-block h-2.5 w-2.5 rounded-full ${
-          connected ? 'bg-green-500' : 'bg-red-500'
+        className={`inline-block h-2 w-2 rounded-full ${
+          connected
+            ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80'
+            : 'bg-red-500 shadow-sm shadow-red-500/80'
         }`}
       />
-      <span className="text-slate-300">{connected ? 'Connected' : 'Disconnected'}</span>
+      <span className="text-sm font-medium text-zinc-300">{connected ? 'Connected' : 'Disconnected'}</span>
     </div>
   )
 }
@@ -141,28 +143,33 @@ function HomeView({ onCreateRoom, onJoinByCode, connected }) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-4 text-slate-100">
+    <div className="wp-glow-bg relative flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 text-zinc-100">
       <div className="absolute right-4 top-4">
         <ConnectionBadge connected={connected} />
       </div>
 
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-8 shadow-2xl">
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-zinc-900/60 p-8 shadow-2xl shadow-black/60 backdrop-blur-xl">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-indigo-500 to-fuchsia-500 text-xl shadow-lg shadow-indigo-500/40">
+          🍿
+        </div>
         <h1 className="mb-1 text-center text-3xl font-bold tracking-tight">
-          <span className="text-indigo-400">Watch</span> Party
+          <span className="bg-linear-to-r from-indigo-300 via-white to-fuchsia-300 bg-clip-text text-transparent">
+            Watch Party
+          </span>
         </h1>
-        <p className="mb-8 text-center text-sm text-slate-400">
+        <p className="mb-8 text-center text-sm text-zinc-400">
           Watch videos together, in sync.
         </p>
 
         <button
           type="button"
           onClick={onCreateRoom}
-          className="mb-6 w-full rounded-xl bg-indigo-500 px-4 py-3 font-semibold text-white transition hover:bg-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+          className="mb-6 w-full rounded-xl bg-linear-to-r from-indigo-500 to-indigo-400 px-4 py-3 font-semibold text-white shadow-lg shadow-indigo-500/30 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
         >
           Create Room
         </button>
 
-        <div className="mb-6 flex items-center gap-3 text-xs uppercase text-slate-500">
+        <div className="mb-6 flex items-center gap-3 text-xs uppercase text-zinc-500">
           <span className="h-px flex-1 bg-white/10" />
           or
           <span className="h-px flex-1 bg-white/10" />
@@ -171,7 +178,7 @@ function HomeView({ onCreateRoom, onJoinByCode, connected }) {
         <form onSubmit={handleSubmit}>
           <label
             htmlFor="room-code"
-            className="mb-2 block text-sm font-medium text-slate-300"
+            className="mb-2 block text-sm font-medium text-zinc-300"
           >
             Enter Room Code
           </label>
@@ -183,11 +190,11 @@ function HomeView({ onCreateRoom, onJoinByCode, connected }) {
               placeholder="ABC123"
               maxLength={12}
               autoComplete="off"
-              className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 font-mono text-lg tracking-widest uppercase placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none"
+              className="w-full rounded-xl border border-white/10 bg-zinc-950/70 px-4 py-3 font-mono text-lg uppercase tracking-widest text-white placeholder:text-zinc-600 focus:border-indigo-400/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
             <button
               type="submit"
-              className="rounded-xl border border-white/10 bg-slate-800 px-5 py-3 font-semibold text-slate-200 transition hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 font-semibold text-zinc-200 transition duration-200 hover:border-indigo-400/40 hover:bg-indigo-500/15 hover:text-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             >
               Join
             </button>
@@ -218,10 +225,10 @@ function ParticipantsModal({ participants, hostName, onClose }) {
       aria-label="Participants"
     >
       <div
-        className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl"
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/80 shadow-2xl shadow-black/60 backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
           <h2 className="text-base font-semibold text-white">
             Participants ({participants.length})
           </h2>
@@ -229,7 +236,7 @@ function ParticipantsModal({ participants, hostName, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+            className="rounded-lg p-1 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-100"
           >
             <svg
               width="18"
@@ -247,19 +254,19 @@ function ParticipantsModal({ participants, hostName, onClose }) {
           </button>
         </div>
 
-        <ul className="max-h-80 space-y-1 overflow-y-auto p-3">
+        <ul className="wp-scrollbar max-h-80 space-y-1 overflow-y-auto p-3">
           {participants.length === 0 && (
-            <li className="px-2 py-3 text-sm text-slate-500">No participants yet.</li>
+            <li className="px-2 py-3 text-sm text-zinc-500">No participants yet.</li>
           )}
           {participants.map((name, i) => (
             <li
               key={`${name}-${i}`}
-              className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
+              className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5"
             >
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" />
-              <span className="flex-1 truncate text-sm text-slate-200">{name}</span>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/70" />
+              <span className="flex-1 truncate text-sm text-zinc-200">{name}</span>
               {hostName && name === hostName && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 text-xs font-semibold text-indigo-300">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 px-2 py-0.5 text-xs font-semibold text-indigo-300">
                   ★ Host
                 </span>
               )}
@@ -526,10 +533,10 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
   }
 
   const tabClass = (tab) =>
-    `flex-1 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+    `flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition duration-200 ${
       activeTab === tab
-        ? 'border-indigo-400 text-white'
-        : 'border-transparent text-slate-400 hover:text-slate-200'
+        ? 'bg-indigo-500/20 text-white shadow-sm shadow-indigo-500/30 ring-1 ring-indigo-400/40'
+        : 'text-zinc-400 ring-1 ring-transparent hover:bg-white/5 hover:text-zinc-200'
     }`
 
   // --- YouTube IFrame player + sync engine --------------------------------
@@ -886,53 +893,101 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
   // Host drift is 0 by definition; guests show the last sampled value.
   const shownDrift = isHost ? 0 : driftMs
 
+  const avatarList = (room.participants || []).slice(0, 4)
+
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-        <h1 className="text-lg font-bold tracking-tight">
-          <span className="text-indigo-400">Watch</span> Party
-        </h1>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setShowParticipants(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            Participants
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-500 px-1.5 text-xs font-semibold text-white">
-              {room.participantCount}
+    <div className="wp-glow-bg flex min-h-screen flex-col bg-zinc-950 text-zinc-100">
+      {/* Top navigation bar: brand, room code chip (1-click copy),
+      participant avatar stack, connection badge and leave action. */}
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-zinc-950/70 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-4 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-fuchsia-500 text-lg shadow-lg shadow-indigo-500/30">
+              🍿
             </span>
-          </button>
-          <ConnectionBadge connected={connected} />
-          <button
-            type="button"
-            onClick={onLeave}
-            className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800"
-          >
-            Leave
-          </button>
+            <h1 className="truncate text-lg font-bold tracking-tight">
+              <span className="bg-linear-to-r from-indigo-300 via-white to-fuchsia-300 bg-clip-text text-transparent">
+                Watch Party
+              </span>
+            </h1>
+          </div>
+
+          <div className="flex min-w-0 items-center gap-2">
+            {/* Room code chip — one click copies the invite link. */}
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1.5 pl-4 pr-1.5 backdrop-blur">
+              <span className="hidden text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500 sm:inline">
+                Room
+              </span>
+              <span className="truncate font-mono text-sm font-bold tracking-[0.25em] text-white">
+                {roomId}
+              </span>
+              <button
+                type="button"
+                onClick={copyInvite}
+                aria-label="Copy invite link"
+                className={`inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-xs font-semibold transition duration-200 ${
+                  copied
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : 'bg-white/10 text-zinc-300 hover:bg-white/20 hover:text-white'
+                }`}
+              >
+                {copied ? '✓ Copied' : '⧉ Copy'}
+              </button>
+            </div>
+
+            {isHost && (
+              <span className="hidden items-center gap-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 px-3 py-1 text-xs font-semibold text-indigo-300 md:inline-flex">
+                ★ Host
+              </span>
+            )}
+
+            {/* Participant avatar stack + counter. */}
+            <button
+              type="button"
+              onClick={() => setShowParticipants(true)}
+              aria-label="Show participants"
+              className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1.5 pr-3 transition duration-200 hover:border-white/25 hover:bg-white/10"
+            >
+              <span className="flex -space-x-2">
+                {avatarList.map((name, i) => (
+                  <span
+                    key={`${name}-${i}`}
+                    title={name}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-950 bg-linear-to-br from-indigo-500 to-sky-500 text-[10px] font-bold uppercase text-white"
+                  >
+                    {String(name || '?').slice(0, 1)}
+                  </span>
+                ))}
+                <span className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-950 bg-zinc-800 text-[10px] font-bold text-zinc-300">
+                  {room.participantCount}
+                </span>
+              </span>
+              <span className="hidden text-xs font-semibold text-zinc-300 sm:inline">
+                watching
+              </span>
+            </button>
+
+            <ConnectionBadge connected={connected} />
+            <button
+              type="button"
+              onClick={onLeave}
+              className="shrink-0 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm font-medium text-zinc-300 transition duration-200 hover:border-red-400/40 hover:bg-red-500/15 hover:text-red-200"
+            >
+              Leave
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-5 lg:flex-row">
-        <div className="flex w-full flex-col gap-5 lg:w-[70%]">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-5 lg:flex-row">
+        <div className="flex w-full min-w-0 flex-col gap-5 lg:w-[72%]">
+          {/* Cinema stage: edge-to-edge curved player with ambient glow. */}
           <div className="relative">
-            <div className="aspect-video w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+            <div
+              aria-hidden="true"
+              className="absolute -inset-3 rounded-[32px] bg-linear-to-tr from-indigo-600/40 via-fuchsia-500/20 to-sky-400/25 blur-2xl"
+            />
+            <div className="relative aspect-video w-full overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl shadow-indigo-950/70 ring-1 ring-white/5">
               <div id="yt-player" className="h-full w-full" />
             </div>
             {/* Muted-autoplay unmute overlay: guests start muted so the
@@ -950,13 +1005,13 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                   }
                   setMuted(false)
                 }}
-                className="absolute bottom-3 right-3 z-10 rounded-full border border-slate-700 bg-black/70 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-black/90"
+                className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white backdrop-blur-md transition duration-200 hover:border-white/40 hover:bg-black/90"
               >
                 🔊 Click to Unmute
               </button>
             )}
             {/* Step 6 — floating emoji reactions overlay (emoji + sender name tag, float up + fade, 2s). */}
-            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
               {floaters.map((f) => (
                 <span
                   key={f.id}
@@ -970,11 +1025,38 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                 </span>
               ))}
             </div>
+          </div>
+
+          {/* Sleek playback control bar docked beneath the stage: host
+          bookmark action, guest sync control and Peek Mode status banner. */}
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-zinc-900/60 px-4 py-3 shadow-lg shadow-black/30 backdrop-blur-xl">
+            {/* Host-only: snapshot the current playhead as a shared bookmark. */}
+            {isHost && (
+              <button
+                type="button"
+                onClick={bookmarkMoment}
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-300 transition duration-200 hover:-translate-y-0.5 hover:bg-amber-500/25 hover:shadow-lg hover:shadow-amber-500/20"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+                Bookmark Moment
+              </button>
+            )}
             {!isHost && (
               <button
                 type="button"
                 onClick={onRequestSync}
-                className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-1.5 text-xs font-medium text-slate-200 shadow-lg backdrop-blur transition hover:bg-slate-800"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-zinc-200 transition duration-200 hover:-translate-y-0.5 hover:border-indigo-400/40 hover:bg-indigo-500/15 hover:text-indigo-200"
               >
                 <svg
                   width="14"
@@ -992,94 +1074,72 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                 Sync with Host
               </button>
             )}
-          </div>
-          {/* Guest peek status: docked control bar in layout flow directly
-          below the video (never overlays the 16:9 player). While peeking,
-          auto-snap is paused; one tap snaps back to live host time. */}
-          {!isHost && isPeeking && (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-amber-200">
-              <span className="flex min-w-0 items-center gap-2 text-sm">
-                <span className="relative flex h-2.5 w-2.5 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+            {/* Guest peek status: docked in the control bar (never overlays the
+            16:9 player). While peeking, auto-snap is paused; one tap snaps
+            back to live host time. */}
+            {!isHost && isPeeking && (
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-2 text-amber-200 backdrop-blur">
+                <span className="flex min-w-0 items-center gap-2 text-sm">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+                  </span>
+                  <span className="truncate">
+                    Viewing bookmarked scene ({peekTime != null ? formatBookmarkTime(peekTime) : '--:--'}) • Playback desynced from host
+                  </span>
                 </span>
-                <span className="truncate">
-                  Viewing bookmarked scene ({peekTime != null ? formatBookmarkTime(peekTime) : '--:--'}) • Playback desynced from host
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={catchUpToLive}
-                className="shrink-0 rounded-lg bg-amber-500 px-3.5 py-1.5 text-sm font-medium text-slate-950 shadow-sm transition-colors hover:bg-amber-400"
-              >
-                Catch Up to Live ⏩
-              </button>
-            </div>
-          )}
-
-          {/* Host-only: snapshot the current playhead as a shared bookmark. */}
-          {isHost && (
-            <div className="flex justify-start">
-              <button
-                type="button"
-                onClick={bookmarkMoment}
-                className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-300 transition hover:bg-amber-500/20"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <button
+                  type="button"
+                  onClick={catchUpToLive}
+                  className="shrink-0 rounded-lg bg-amber-400 px-3.5 py-1.5 text-sm font-bold text-zinc-950 shadow-sm transition-colors duration-200 hover:bg-amber-300"
                 >
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                </svg>
-                Bookmark Moment
-              </button>
-            </div>
-          )}
+                  Catch Up to Live ⏩
+                </button>
+              </div>
+            )}
+          </div>
 
-          {/* Shared bookmarks: collapsible card below room details — visible to
-          EVERYONE (host + guests). List + timestamps are shared; host-only
-          controls stay gated below. Guests can jump locally only; only the
-          host's jump emits a room-wide media_action seek. */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          {/* Interactive bookmarks drawer beneath the player: clean timestamps,
+          note tags and quick-jump pills in a horizontal carousel. Visible to
+          EVERYONE (host + guests); only the host's jump emits a room-wide
+          media_action. */}
+          <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-4 shadow-xl shadow-black/30 backdrop-blur-xl">
             <button
               type="button"
               onClick={() => setShowBookmarks((v) => !v)}
               aria-expanded={showBookmarks}
               className="flex w-full items-center justify-between text-left"
             >
-              <div className="flex items-center gap-2">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-amber-300"
-                >
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                </svg>
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300 ring-1 ring-amber-400/30">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                </span>
                 <span className="text-sm font-semibold text-white">
                   Bookmarks
-                  <span className="ml-2 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300">
+                  <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-zinc-300 ring-1 ring-white/10">
                     {safeBookmarks.length}
                   </span>
                 </span>
               </div>
-              <span className="text-slate-400">{showBookmarks ? '▾' : '▸'}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-400">
+                {showBookmarks ? '▾' : '▸'}
+              </span>
             </button>
             {showBookmarks && (
-              <div className="mt-3 space-y-2">
+              <div className="wp-scrollbar-none mt-3 flex gap-3 overflow-x-auto pb-1">
                 {safeBookmarks.length === 0 && (
-                  <p className="text-sm text-slate-500">
+                  <p className="py-3 text-sm text-zinc-500">
                     No bookmarks yet.{isHost ? ' Hit “Bookmark Moment” to save a scene.' : ' The host can save scene bookmarks here.'}
                   </p>
                 )}
@@ -1092,16 +1152,21 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                   return (
                   <div
                     key={bm.id}
-                    className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2"
+                    className="flex w-60 shrink-0 flex-col gap-2 self-start rounded-xl border border-white/10 bg-zinc-950/70 p-3 transition duration-200 hover:-translate-y-0.5 hover:border-indigo-400/40 hover:bg-zinc-900/80 hover:shadow-lg hover:shadow-indigo-500/10"
                   >
-                    <span className="shrink-0 rounded-md bg-amber-500/15 px-2 py-1 font-mono text-xs font-semibold text-amber-300">
-                      {formatBookmarkTime(bm.timestamp)}
-                    </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-lg bg-amber-500/15 px-2 py-1 font-mono text-xs font-semibold tracking-wide text-amber-300 ring-1 ring-amber-400/30">
+                        {formatBookmarkTime(bm.timestamp)}
+                      </span>
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+                        Scene
+                      </span>
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-slate-200" title={bm.note || ''}>
+                      <div className="truncate text-sm font-medium text-zinc-200" title={bm.note || ''}>
                         {bm.note || `Bookmark at ${formatBookmarkTime(bm.timestamp)}`}
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
                         {bm.createdAt && <span>saved {bm.createdAt}</span>}
                         {isOtherVideo && (
                           <span
@@ -1113,34 +1178,36 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                         )}
                       </div>
                     </div>
-                    {isHost ? (
-                      <>
+                    <div className="mt-auto flex items-center gap-2 pt-1">
+                      {isHost ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => jumpToBookmark(bm)}
+                            className="flex-1 rounded-lg bg-indigo-500 px-2.5 py-1.5 text-xs font-semibold text-white transition duration-200 hover:bg-indigo-400 hover:shadow-md hover:shadow-indigo-500/30"
+                          >
+                            Jump to Scene
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteBookmark(bm.id)}
+                            aria-label={`Delete bookmark ${formatBookmarkTime(bm.timestamp)}`}
+                            className="shrink-0 rounded-lg border border-white/10 px-2 py-1.5 text-xs text-zinc-500 transition hover:border-red-400/40 hover:bg-red-500/15 hover:text-red-300"
+                          >
+                            ✕
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => jumpToBookmark(bm)}
-                          className="shrink-0 rounded-lg bg-indigo-500 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-indigo-400"
+                          title="Jump locally (host is not affected)"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-semibold text-zinc-200 transition duration-200 hover:border-indigo-400/40 hover:bg-indigo-500/15 hover:text-indigo-200"
                         >
                           Jump to Scene
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteBookmark(bm.id)}
-                          aria-label={`Delete bookmark ${formatBookmarkTime(bm.timestamp)}`}
-                          className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-800 hover:text-slate-200"
-                        >
-                          ✕
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => jumpToBookmark(bm)}
-                        title="Jump locally (host is not affected)"
-                        className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
-                      >
-                        Jump to Scene
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
                   )
                 })}
@@ -1148,88 +1215,70 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-slate-500">Room ID</div>
-                <div className="font-mono text-2xl font-bold tracking-widest text-white">
-                  {roomId}
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {isHost && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-indigo-500/40 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
-                    ★ Host
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={copyInvite}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700"
-                >
-                  {copied ? 'Copied!' : 'Copy Invite Link'}
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
-        <aside className="flex w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 lg:w-[30%]">
-          <div className="flex border-b border-slate-800">
+        <aside className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/60 shadow-2xl shadow-black/40 backdrop-blur-xl lg:w-[28%]">
+          {/* Unified tab deck with a glowing active pill. */}
+          <div className="flex gap-1.5 border-b border-white/10 bg-zinc-950/40 p-2">
             <button
               type="button"
               onClick={() => setActiveTab('chat')}
               className={tabClass('chat')}
             >
-              Chat
+              💬 Chat
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('queue')}
               className={tabClass('queue')}
             >
-              Movie Queue
+              🎬 Movie Queue
             </button>
           </div>
 
           {activeTab === 'chat' && (
-            <div className="flex flex-1 flex-col">
-              <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="wp-scrollbar flex-1 space-y-3 overflow-y-auto p-4">
                 {chatMessages.length === 0 && (
-                  <p className="text-sm text-slate-500">No messages yet. Say hi 👋</p>
+                  <p className="text-sm text-zinc-500">No messages yet. Say hi 👋</p>
                 )}
                 {chatMessages.map((m) => (
-                  <div key={m.id} className="text-sm">
-                    <span className="font-semibold text-indigo-300">{m.sender}</span>
-                    <span className="ml-2 text-xs text-slate-500">{formatTime(m.timestamp)}</span>
-                    <div className="text-slate-300">{m.text}</div>
+                  <div
+                    key={m.id}
+                    className="rounded-xl border border-white/5 bg-white/5 px-3 py-2 transition duration-150 hover:border-white/10"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-indigo-300">{m.sender}</span>
+                      <span className="shrink-0 text-[11px] text-zinc-500">{formatTime(m.timestamp)}</span>
+                    </div>
+                    <div className="break-words text-sm text-zinc-200">{m.text}</div>
                   </div>
                 ))}
               </div>
-              {/* Step 6 — quick emoji reactions: broadcast to the whole room. */}
-              <div className="flex flex-wrap items-center gap-1 border-t border-slate-800 px-3 pt-2">
+              {/* Step 6 — floating quick-emoji trigger bar: broadcast to the whole room. */}
+              <div className="wp-scrollbar-none flex flex-wrap items-center gap-1 border-t border-white/10 bg-zinc-950/30 px-3 py-2">
                 {EMOJI_PALETTE.map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
                     onClick={() => sendReaction(emoji)}
                     aria-label={`Send ${emoji} reaction`}
-                    className="rounded-lg px-2 py-1 text-xl transition hover:scale-110 hover:bg-slate-800"
+                    className="rounded-lg px-2 py-1 text-xl transition duration-150 hover:scale-125 hover:bg-white/10"
                   >
                     {emoji}
                   </button>
                 ))}
               </div>
-              <form onSubmit={sendMessage} className="flex gap-2 p-3">
+              <form onSubmit={sendMessage} className="sticky bottom-0 flex gap-2 border-t border-white/10 bg-zinc-900/80 p-3 backdrop-blur">
                 <input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Send a message…"
-                  className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full rounded-xl border border-white/10 bg-zinc-950/70 px-3.5 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-indigo-400/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                 />
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
+                  className="rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:bg-indigo-400 hover:shadow-lg hover:shadow-indigo-500/30"
                 >
                   Send
                 </button>
@@ -1238,20 +1287,20 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
           )}
 
           {activeTab === 'queue' && (
-            <div className="flex flex-1 flex-col">
-              <div className="flex-1 space-y-2 overflow-y-auto p-4">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="wp-scrollbar flex-1 space-y-2 overflow-y-auto p-4">
                 {queue.length === 0 && (
-                  <p className="text-sm text-slate-500">Queue is empty. Add a video to get started.</p>
+                  <p className="text-sm text-zinc-500">Queue is empty. Add a video to get started.</p>
                 )}
                 {queue.map((v, index) => (
                   <div
                     key={`${v.videoId}-${index}`}
-                    className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-300"
+                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-300 transition duration-150 hover:border-white/20 hover:bg-zinc-900/80"
                   >
                     <span className="text-indigo-400">▶</span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate" title={v.title}>{v.title}</div>
-                      <div className="truncate text-xs text-slate-500">
+                      <div className="truncate text-xs text-zinc-500">
                         {v.videoId}{v.addedBy ? ` • added by ${v.addedBy}` : ''}
                       </div>
                     </div>
@@ -1259,7 +1308,7 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                       <button
                         type="button"
                         onClick={() => playQueued(index)}
-                        className="shrink-0 rounded-lg bg-indigo-500 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-indigo-400"
+                        className="shrink-0 rounded-lg bg-indigo-500 px-2.5 py-1.5 text-xs font-semibold text-white transition duration-200 hover:bg-indigo-400 hover:shadow-md hover:shadow-indigo-500/30"
                       >
                         Play Now
                       </button>
@@ -1268,24 +1317,24 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
                       type="button"
                       onClick={() => onRemoveFromQueue(index)}
                       aria-label={`Remove ${v.title} from queue`}
-                      className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-800 hover:text-slate-200"
+                      className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-zinc-500 transition hover:border-red-400/40 hover:bg-red-500/15 hover:text-red-300"
                     >
                       ✕
                     </button>
                   </div>
                 ))}
               </div>
-              <form onSubmit={addVideo} className="border-t border-slate-800 p-3">
+              <form onSubmit={addVideo} className="sticky bottom-0 border-t border-white/10 bg-zinc-900/80 p-3 backdrop-blur">
                 <div className="flex gap-2">
                   <input
                     value={videoUrl}
                     onChange={(e) => setVideoUrl(e.target.value)}
                     placeholder="Paste a YouTube URL or video ID…"
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none"
+                    className="w-full rounded-xl border border-white/10 bg-zinc-950/70 px-3.5 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-indigo-400/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                   />
                   <button
                     type="submit"
-                    className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
+                    className="shrink-0 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:bg-indigo-400 hover:shadow-lg hover:shadow-indigo-500/30"
                   >
                     Add Video
                   </button>
@@ -1308,34 +1357,37 @@ function RoomView({ roomId, room, socketId, username, onLeave, connected, media,
       )}
 
       {/* Step 6 — latency & drift diagnostics drawer (bottom-left, clear of chat + reactions). */}
-      <div className="fixed bottom-4 left-4 z-40 w-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl backdrop-blur">
+      <div className="fixed bottom-4 left-4 z-40 w-72 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/70 shadow-2xl shadow-black/50 backdrop-blur-xl transition duration-200">
         <button
           type="button"
           onClick={() => setShowDiag((v) => !v)}
-          className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:text-slate-200"
+          className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-400 transition hover:text-white"
         >
-          <span>Diagnostics</span>
-          <span className="text-slate-500">{showDiag ? '▾' : '▴'}</span>
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/70" />
+            Diagnostics
+          </span>
+          <span className="text-zinc-500">{showDiag ? '▾' : '▴'}</span>
         </button>
         {showDiag && (
-          <div className="space-y-2 border-t border-slate-800 px-4 py-3 text-sm">
+          <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Local Network Latency</span>
-              <span className={`font-mono font-semibold ${latencyMs != null && latencyMs <= 250 ? 'text-green-400' : 'text-amber-400'}`}>
+              <span className="text-zinc-400">Local Network Latency</span>
+              <span className={`font-mono font-semibold ${latencyMs != null && latencyMs <= 250 ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {latencyMs != null ? `~${latencyMs} ms` : '—'}
               </span>
             </div>
-            <div className="text-right text-[11px] text-slate-600">Target: &le; 250 ms</div>
+            <div className="text-right text-[11px] text-zinc-600">Target: &le; 250 ms</div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Max Playback Drift</span>
-              <span className={`font-mono font-semibold ${shownDrift != null && shownDrift <= 500 ? 'text-green-400' : 'text-amber-400'}`}>
+              <span className="text-zinc-400">Max Playback Drift</span>
+              <span className={`font-mono font-semibold ${shownDrift != null && shownDrift <= 500 ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {shownDrift != null ? `${shownDrift} ms` : '—'}
               </span>
             </div>
-            <div className="text-right text-[11px] text-slate-600">Target: &le; 500 ms</div>
-            <div className="flex items-center justify-between border-t border-slate-800 pt-2">
-              <span className="text-slate-400">Connected Peers</span>
-              <span className="font-mono font-semibold text-slate-200">
+            <div className="text-right text-[11px] text-zinc-600">Target: &le; 500 ms</div>
+            <div className="flex items-center justify-between border-t border-white/10 pt-2">
+              <span className="text-zinc-400">Connected Peers</span>
+              <span className="font-mono font-semibold text-zinc-200">
                 {room.participantCount} user{room.participantCount === 1 ? '' : 's'}
               </span>
             </div>

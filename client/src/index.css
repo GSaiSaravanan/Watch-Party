@@ -1,5 +1,64 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Watch Party design system — dark glassmorphism / studio streaming vibe.
+   Presentation layer only: no application logic lives in this file.
+   ========================================================================== */
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #09090b; /* zinc-950 */
+  color: #f4f4f5;
+}
+
+/* Subtle radial glows behind the app shell (theater / studio mood). */
+.wp-glow-bg {
+  background-image:
+    radial-gradient(920px 540px at 14% -10%, rgba(99, 102, 241, 0.16), transparent 62%),
+    radial-gradient(780px 460px at 92% -4%, rgba(217, 70, 239, 0.10), transparent 60%),
+    radial-gradient(1100px 720px at 50% 112%, rgba(56, 189, 248, 0.08), transparent 62%);
+}
+
+/* Glass surface: zinc-900/60 + backdrop blur + hairline white border. */
+.wp-glass {
+  background: rgba(24, 24, 27, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Custom sleek scrollbar for sidebar / panel lists. */
+.wp-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.wp-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.wp-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.wp-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+}
+.wp-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* Hide scrollbars (bookmark carousel / emoji strips stay swipeable). */
+.wp-scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.wp-scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Step 6 — floating emoji reactions: rise up and fade out over 2s. */
 @keyframes float-up {
   0% {
